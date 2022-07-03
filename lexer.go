@@ -2,9 +2,62 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+	"unicode"
 )
+
+const (
+	T_NAN       = "__NAN__"
+	T_UNDEFINED = "__UNDEFINED__"
+	T_IF        = "__IF__"
+	T_ELSE      = "__ELSE__"
+	T_RETURN    = "__RETURN__"
+	T_LBRACE    = "__{__"
+	T_RBRACE    = "__}__"
+	T_LBRACK    = "__[__"
+	T_RBRACK    = "__]__"
+	T_LPAREN    = "__(__"
+	T_RPAREN    = "__)__"
+
+	T_ARRAY     = "__[]__"
+	T_NOT       = "__!__"
+	T_AND       = "__and__"
+	T_OR        = "__or__"
+	T_SEMICOLON = "__;__"
+	T_COMMA     = "__,__"
+	T_ASSIGN    = "__=__"
+	T_EQ        = "__==__"
+	T_LT        = "<"
+	T_GT        = ">"
+	T_LTE       = "<="
+	T_GTE       = ">="
+	T_LET       = "__LET__"
+	T_FOR       = "__FOR__"
+
+	T_FUNC_CALL = "__FUNC_CALL__"
+	T_FUNC_DEC  = "__FUNC_DEC__"
+	T_ADD       = "__+__"
+	T_SUB       = "__-__"
+	T_MUL       = "__*__"
+	T_QUO       = "__/__"
+	T_MOD       = "__%__"
+	T_VAR       = "__VAR__"
+	T_NUMBER    = "__NUMBER__"
+	T_UNARY     = "__UNARY__"
+	T_STRING    = "__STRING__"
+)
+
+type Token struct {
+	Kind  string
+	Value string
+	Pos   int
+	Line  int
+	Col   int
+}
+
+func (t *Token) String() string {
+	return fmt.Sprintf(`Token kind=%s, value=%s, pos=%d`, t.Kind, t.Value, t.Pos)
+}
 
 type Lexer struct {
 	cursor int
@@ -78,7 +131,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 				Line:  line,
 				Col:   col,
 			})
-		} else if isNumber(char) {
+		} else if unicode.IsDigit(rune(char)) {
 			tokens = append(tokens, Token{
 				Kind:  T_NUMBER,
 				Value: l.parseNumber(),
@@ -88,7 +141,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			})
 		} else if char == '(' {
 			tokens = append(tokens, Token{
-				Kind:  T_LPAR,
+				Kind:  T_LPAREN,
 				Value: string(char),
 				Pos:   0,
 				Line:  line,
@@ -96,7 +149,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			})
 		} else if char == ')' {
 			tokens = append(tokens, Token{
-				Kind:  T_RPAR,
+				Kind:  T_RPAREN,
 				Value: string(char),
 				Pos:   0,
 				Line:  line,
@@ -112,7 +165,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			})
 		} else if char == ';' {
 			tokens = append(tokens, Token{
-				Kind:  T_COMA,
+				Kind:  T_SEMICOLON,
 				Value: string(char),
 				Pos:   0,
 				Line:  line,
@@ -120,7 +173,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			})
 		} else if char == ',' {
 			tokens = append(tokens, Token{
-				Kind:  T_SEMI,
+				Kind:  T_COMMA,
 				Value: string(char),
 				Pos:   0,
 				Line:  line,
@@ -151,7 +204,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 				Col:   col,
 			})
 		} else if char == '[' {
-			tKind := T_LINDEX
+			tKind := T_LBRACK
 			tValue := string(char)
 			if l.peek() == ']' {
 				l.readChar()
@@ -167,7 +220,7 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			})
 		} else if char == ']' {
 			tokens = append(tokens, Token{
-				Kind:  T_RINDEX,
+				Kind:  T_RBRACK,
 				Value: string(char),
 				Pos:   0,
 				Line:  line,
@@ -187,8 +240,6 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 				kind = T_FOR
 			case value == "fn" && isWS(peek):
 				kind = T_FUNC_DEC
-			case value == "print" && peekNonWSValue == '(':
-				kind = T_IFUNC
 			case value == "return" && isWS(peek):
 				kind = T_RETURN
 			case value == "if" && peekNonWSValue == '(':
@@ -295,16 +346,16 @@ func (l *Lexer) parseLiteral() string {
 }
 
 func (l *Lexer) parseNumber() string {
-	comaFound := false
+	commaFound := false
 	var result []byte
 	// push first char
 	result = append(result, l.getCurrentChar())
 	for l.cursor < len(l.source)-1 {
 		char := l.getChar()
-		if isNumber(char) {
+		if unicode.IsDigit(rune(char)) {
 			result = append(result, char)
-		} else if char == '.' && !comaFound {
-			comaFound = true
+		} else if char == '.' && !commaFound {
+			commaFound = true
 			result = append(result, char)
 		} else {
 			l.cursor--
@@ -315,31 +366,39 @@ func (l *Lexer) parseNumber() string {
 	return string(result)
 }
 
-func isNumber(char byte) bool {
-	return char >= '0' && char <= '9'
-}
-
 func parseOp(char byte) (bool, string) {
 	switch char {
 	case '+':
-		return true, T_PLUS
+		return true, T_ADD
 	case '-':
-		return true, T_MINUS
+		return true, T_SUB
 	case '*':
-		return true, T_MULT
+		return true, T_MUL
 	case '/':
-		return true, T_DIV
+		return true, T_QUO
 	case '%':
 		return true, T_MOD
 	}
 	return false, ""
 }
 
-// this is stupid: use ASCII checks
-var validLiteral = regexp.MustCompile(`^([a-zA-Z_]+)([a-zA-Z0-9_\.]*)$`)
-
 func isLiteral(in string) bool {
-	return validLiteral.MatchString(in)
+	for i, c := range in {
+		if !unicode.IsLetter(c) && c != '_' && (i == 0 || !unicode.IsDigit(c)) {
+			return false
+		}
+	}
+	return in != ""
+}
+
+func isKeyword(word string) bool {
+	keywords := []string{"break", "fn", "for", "let"}
+	for _, k := range keywords {
+		if k == word {
+			return true
+		}
+	}
+	return false
 }
 
 func isWS(char byte) bool {

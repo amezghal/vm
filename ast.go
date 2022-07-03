@@ -3,361 +3,31 @@ package main
 import (
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
-	"vm/token"
 )
 
-/*
-Number logic
-*/
 var mainCursor = 0
-var maxCursor = 300
+var maxCursor = math.MaxInt - 1
 var tokens []Token
 
-const (
-	funcDeclNode = iota
-	forNode
-	funcCallNode
-	assignNode
-	unaryNode
-	literalNode
-	literalGroupNode
-	ifNode
-	elseIfNode
-	elseNode
-	funcCallArgsNode
-	funcDeclArgsNode
-	varDecNode
-	funcArgValueNode
-	expressionNode
-	opNode
-	valueNode
-	bodyNode
-	returnNode
-	capturedGroupNode
-	arrayDeclNode
-	arrayIndexNode
-)
-
-type Amez struct {
-	tok   token.Token
-	value interface{}
-}
-
-/*
- same as javascript
-	variants
-"5"  ADD           "4"            = "54"
-"5"  ADD           int(4)         = "54"
-"5"  ADD           float(12.34)   = "512.34"
-"5" MUL|QUO|SUB   ?              = NAN
-"aa" MUL|QUO|SUB   ?              = NAN
-*/
-
-type Number interface {
-	int64 | float64
-}
-
-func doArith(op token.Token, operand1, operand2 interface{}) interface{} {
-	// accept only int64, float64, string|+operation
-	var (
-		op1IsInt, op1IsFloat, op1IsString bool
-		op2IsInt, op2IsFloat, op2IsString bool
-	)
-
-	switch operand1.(type) {
-	case int64:
-		op1IsInt = true
-	case float64:
-		op1IsFloat = true
-	case string:
-		op1IsString = true
-	default:
-		panic(fmt.Sprintf("unvalid provided type %T", operand1))
-	}
-
-	switch operand2.(type) {
-	case int64:
-		op2IsInt = true
-	case float64:
-		op2IsFloat = true
-	case string:
-		op2IsString = true
-	default:
-		panic(fmt.Sprintf("unvalid provided type %T", operand2))
-	}
-
-	if (op1IsString && !op2IsString) || (!op1IsString && op2IsString) || ((op1IsString || op2IsString) && op != token.ADD) {
-		panic("both params should be string if one is string and only + is available")
-	}
-
-	// only accept + for string
-	if (op1IsString && op2IsString) && op == token.ADD {
-		return operand1.(string) + operand2.(string)
-	}
-
-	calcInts := func(operator token.Token, op1, op2 int64) int64 {
-		switch operator {
-		case token.ADD:
-			return op1 + op2
-		case token.SUB:
-			return op1 - op2
-		case token.MUL:
-			return op1 * op2
-		case token.QUO:
-			return op1 / op2
-		default:
-			return 0
-		}
-	}
-
-	calcFloats := func(operator token.Token, op1, op2 float64) float64 {
-		switch operator {
-		case token.ADD:
-			return op1 + op2
-		case token.SUB:
-			return op1 - op2
-		case token.MUL:
-			return op1 * op2
-		case token.QUO:
-			return op1 / op2
-		case token.REM:
-			return math.Mod(op1, op2)
-		default:
-			return .0
-		}
-	}
-
-	if (op1IsInt && !op2IsInt) || (op == token.REM && op1IsInt) {
-		operand1 = float64(operand1.(int64))
-		op1IsFloat = true
-	}
-
-	if (!op1IsInt && op2IsInt) || (op == token.REM && op2IsInt) {
-		operand2 = float64(operand2.(int64))
-		op2IsFloat = true
-	}
-
-	if op == token.REM || op1IsFloat || op2IsFloat {
-		return calcFloats(op, operand1.(float64), operand2.(float64))
-	}
-
-	// can be only int
-	resultInt := calcInts(op, operand1.(int64), operand2.(int64))
-	if op == token.QUO {
-		resultFloat := calcFloats(op, float64(operand1.(int64)), float64(operand2.(int64)))
-		if float64(resultInt) < resultFloat {
-			return resultFloat
-		}
-	}
-
-	return resultInt
-}
-
-func Arith(op token.Token, n1, n2 Amez) Amez {
-	if n1.tok == token.NAN || n2.tok == token.NAN {
-		return Amez{
-			tok:   token.NAN,
-			value: "NAN",
-		}
-	}
-
-	isInt := func(src interface{}) bool {
-		switch src.(type) {
-		case int8, int16, int32, int64, int, uint8, uint16, uint32, uint64, uint:
-			return true
-		}
-		return false
-	}
-	isFloat := func(src interface{}) bool {
-		switch src.(type) {
-		case float32, float64:
-			return true
-		}
-		return false
-	}
-
-	asInt := func(src interface{}) int64 {
-		switch src.(type) {
-		case int8:
-			return int64(src.(int8))
-		case int16:
-			return int64(src.(int16))
-		case int32:
-			return int64(src.(int32))
-		case int64:
-			return src.(int64)
-		case int:
-			return int64(src.(int))
-		case uint8:
-			return int64(src.(uint8))
-		case uint16:
-			return int64(src.(uint16))
-		case uint32:
-			return int64(src.(uint32))
-		case uint64:
-			return int64(src.(uint64))
-		case uint:
-			return int64(src.(uint))
-		}
-		return int64(0)
-	}
-	asFloat := func(src interface{}) float64 {
-		switch src.(type) {
-		case int8:
-			return float64(src.(int8))
-		case int16:
-			return float64(src.(int16))
-		case int32:
-			return float64(src.(int32))
-		case int64:
-			return float64(src.(int64))
-		case int:
-			return float64(src.(int))
-		case uint8:
-			return float64(src.(uint8))
-		case uint16:
-			return float64(src.(uint16))
-		case uint32:
-			return float64(src.(uint32))
-		case uint64:
-			return float64(src.(uint64))
-		case uint:
-			return float64(src.(uint))
-		case float32:
-			return float64(src.(float32))
-		case float64:
-			return src.(float64)
-		}
-		return float64(0)
-	}
-
-	if op.IsOperator() {
-		switch {
-		case n1.tok == token.STRING:
-			if op == token.ADD {
-				result := strings.Builder{}
-				result.WriteString(n1.value.(string))
-				switch {
-				case n2.tok == token.STRING:
-					result.WriteString(n2.value.(string))
-				case isInt(n2.value):
-					result.Write(strconv.AppendInt([]byte{}, asInt(n2.value), 10))
-				case isFloat(n2.value):
-					result.WriteString(fmt.Sprintf("%.2f", asFloat(n2.value)))
-				}
-				return Amez{
-					tok:   token.STRING,
-					value: result.String(),
-				}
-			} else {
-				// other ops: operand1 should be convertible to NUMBER and operand2 should be of type number
-				var result interface{}
-				if v, err := strconv.ParseFloat(n1.value.(string), 64); err == nil {
-					if n2.tok == token.NUMBER {
-						result = doArith(op, asFloat(v), asFloat(n2.value))
-					} else if v2, err := strconv.ParseFloat(n2.value.(string), 64); err == nil {
-						result = doArith(op, asFloat(v), asFloat(v2))
-					}
-				}
-
-				if result != nil {
-					return Amez{
-						tok:   token.NUMBER,
-						value: result,
-					}
-				}
-			}
-
-		case isFloat(n1.value):
-			var rr interface{}
-			switch {
-			case isInt(n2.value), isFloat(n2.value):
-				rr = doArith(op, asFloat(n1.value), asFloat(n2.value))
-			case n2.tok == token.STRING:
-				if v, err := strconv.ParseFloat(n2.value.(string), 64); err == nil {
-					rr = doArith(op, asFloat(n1.value), asFloat(v))
-				} else if op == token.ADD {
-					result := fmt.Sprintf(`%.2f%s`, asFloat(n1.value), n2.value.(string))
-					return Amez{
-						tok:   token.STRING,
-						value: result,
-					}
-				}
-			}
-
-			if rr != nil {
-				return Amez{
-					tok:   token.NUMBER,
-					value: rr,
-				}
-			}
-		case isInt(n1.value):
-			var rr interface{}
-			switch {
-			case isInt(n2.value):
-				rr = doArith(op, asInt(n1.value), asInt(n2.value))
-			case isFloat(n2.value):
-				rr = doArith(op, asFloat(n1.value), asFloat(n2.value))
-			case n2.tok == token.STRING:
-				if v, err := strconv.ParseInt(n2.value.(string), 10, 64); err == nil {
-					rr = doArith(op, asInt(n1.value), asInt(v))
-				} else if v, err := strconv.ParseFloat(n2.value.(string), 64); err == nil {
-					rr = doArith(op, asFloat(n1.value), asFloat(v))
-				} else {
-					if op == token.ADD {
-						result := strings.Builder{}
-						result.Write(strconv.AppendInt([]byte{}, asInt(n1.value), 10))
-						result.WriteString(n2.value.(string))
-						return Amez{
-							tok:   token.STRING,
-							value: result.String(),
-						}
-					}
-				}
-			}
-
-			if rr != nil {
-				return Amez{
-					tok:   token.NUMBER,
-					value: rr,
-				}
-			}
-		}
-
-	}
-
-	return Amez{
-		tok:   token.NAN,
-		value: "NAN",
-	}
-}
-
+// all astNodes must be of type astNode
 type astNode interface {
-	Kind() int
+	Kind()
 }
 
 type astCapturedGroupNode astStack
 
-func (astCapturedGroupNode) Kind() int {
-	return capturedGroupNode
-}
+func (astCapturedGroupNode) Kind() {}
 
 type astArrayDecl struct{}
 
-func (astArrayDecl) Kind() int {
-	return arrayDeclNode
-}
+func (astArrayDecl) Kind() {}
 
 type astVarArrayIndex struct {
 	index astExpression
 	value astVarDec
 }
 
-func (astVarArrayIndex) Kind() int {
-	return arrayIndexNode
-}
+func (astVarArrayIndex) Kind() {}
 
 type astFuncDecl struct {
 	Type   int
@@ -367,9 +37,7 @@ type astFuncDecl struct {
 	Return astExpression
 }
 
-func (astFuncDecl) Kind() int {
-	return funcDeclNode
-}
+func (astFuncDecl) Kind() {}
 
 type astAssign struct {
 	Left  astNode
@@ -377,53 +45,39 @@ type astAssign struct {
 	IsLet bool
 }
 
-func (astAssign) Kind() int {
-	return assignNode
-}
+func (astAssign) Kind() {}
 
 type astLiteral struct {
 	Unary *astUnary
 	Value astNode
 }
 
-func (astLiteral) Kind() int {
-	return literalNode
-}
+func (astLiteral) Kind() {}
 
 type astReturn struct {
 	Stmt *astExpression
 }
 
-func (astReturn) Kind() int {
-	return returnNode
-}
+func (astReturn) Kind() {}
 
 type astUnary string
 
-func (astUnary) Kind() int {
-	return unaryNode
-}
+func (astUnary) Kind() {}
 
 type astExpression []astNode
 
-func (astExpression) Kind() int {
-	return expressionNode
-}
+func (astExpression) Kind() {}
 
 type astBody []astNode
 
-func (astBody) Kind() int {
-	return bodyNode
-}
+func (astBody) Kind() {}
 
 type astFuncCall struct {
 	Name string
 	Args astFunCallArgs
 }
 
-func (astFuncCall) Kind() int {
-	return funcCallNode
-}
+func (astFuncCall) Kind() {}
 
 type astIf struct {
 	Cond    astNode
@@ -432,26 +86,20 @@ type astIf struct {
 	Else    astElse
 }
 
-func (astIf) Kind() int {
-	return ifNode
-}
+func (astIf) Kind() {}
 
 type astElseIf struct {
 	Cond astNode
 	Body astBody
 }
 
-func (astElseIf) Kind() int {
-	return elseIfNode
-}
+func (astElseIf) Kind() {}
 
 type astElse struct {
 	Body astBody
 }
 
-func (astElse) Kind() int {
-	return elseNode
-}
+func (astElse) Kind() {}
 
 type astFor struct {
 	Pre  astNode
@@ -460,30 +108,38 @@ type astFor struct {
 	Body astBody
 }
 
-func (astFor) Kind() int {
-	return forNode
-}
+func (astFor) Kind() {}
 
 type astVarDec struct {
 	Token
 }
 
-func (astVarDec) Kind() int {
-	return varDecNode
-}
+func (astVarDec) Kind() {}
 
 type astFuncArgValue string
 
-func (astFuncArgValue) Kind() int {
-	return funcArgValueNode
-}
+func (astFuncArgValue) Kind() {}
 
 type astOp struct {
 	Token Token
 }
 
-func (astOp) Kind() int {
-	return opNode
+func (astOp) Kind() {}
+
+func (op astOp) Prec() int {
+	switch op.Token.Kind {
+	case T_OR:
+		return 1
+	case T_AND:
+		return 2
+	case T_EQ, T_LT, T_LTE, T_GT, T_GTE:
+		return 3
+	case T_ADD, T_SUB:
+		return 4
+	case T_MUL, T_QUO, T_MOD:
+		return 5
+	}
+	return 0
 }
 
 type astLitGroup struct {
@@ -491,30 +147,23 @@ type astLitGroup struct {
 	Value astNode
 }
 
-func (astLitGroup) Kind() int {
-	return literalGroupNode
-}
+func (astLitGroup) Kind() {}
 
 type astValue struct {
 	Value Token
 }
 
-func (astValue) Kind() int {
-	return valueNode
-}
+func (astValue) Kind() {}
 
 type astFunCallArgs []astExpression
 
-func (astFunCallArgs) Kind() int {
-	return funcCallArgsNode
-}
+func (astFunCallArgs) Kind() {}
 
 type astFuncDeclArgs []astNode
 
-func (astFuncDeclArgs) Kind() int {
-	return funcDeclArgsNode
-}
+func (astFuncDeclArgs) Kind() {}
 
+// get the next token from the lexer and make progress
 func ntk() string {
 	if mainCursor >= maxCursor {
 		return ""
@@ -524,6 +173,7 @@ func ntk() string {
 	return ret.Kind
 }
 
+// peek the next token, look-ahead
 func peek() string {
 	if mainCursor >= maxCursor {
 		return ""
@@ -532,12 +182,26 @@ func peek() string {
 	return ret.Kind
 }
 
+// get the current token
 func current() string {
 	if mainCursor-1 < 0 {
 		return ""
 	}
 	ret := tokens[mainCursor-1]
 	return ret.Kind
+}
+
+var errors []string
+
+func errorExpect(expected string) {
+	current := tokens[mainCursor]
+	errors = append(errors, fmt.Sprintf(`Expected %s at %d:%d got %s`, expected, current.Line, current.Col, current.Kind))
+}
+
+func printAllErrors() {
+	for _, err := range errors {
+		fmt.Println(err)
+	}
 }
 
 func parseScript(tt []Token) (bool, []astNode) {
@@ -560,6 +224,74 @@ func parseScript(tt []Token) (bool, []astNode) {
 	return found, tree
 }
 
+func parseFuncDecl() astNode {
+
+	cursor := mainCursor
+	node := astFuncDecl{} // the expected `astNode` type to be returned
+
+	// as we make progress parsing, we store parse errors here
+	var parseErr string
+
+	if ntk() == T_FUNC_DEC { // once we have the `func` declaration keyword, we should expect a valid function decl
+		if peek() != T_FUNC_CALL {
+			parseErr = T_FUNC_CALL
+			goto fail
+		}
+		ntk() // read next token to make progress
+
+		node.Name = tokens[mainCursor-1].Value
+
+		if peek() != T_LPAREN {
+			parseErr = T_LPAREN
+			goto fail
+		}
+		ntk() // make progress
+
+		if n := parseFuncDeclArgs(); n != nil {
+			if peek() != T_RPAREN {
+				parseErr = T_RPAREN
+				goto fail
+			}
+			ntk()
+
+			if peek() != T_LBRACE {
+				parseErr = T_LBRACE
+				goto fail
+			}
+			ntk()
+
+			node.Args = n.(astFuncDeclArgs)
+
+			if nBody := parseBody(); nBody != nil {
+				node.Body = nBody.(astBody)
+			} else {
+				goto fail
+			}
+
+			if peek() != T_RBRACE {
+				parseErr = T_RBRACE
+				goto fail
+			}
+			ntk()
+			return node
+		}
+	}
+fail:
+	errorExpect(parseErr)
+	mainCursor = cursor
+	return nil
+}
+
+func parseAssign() astNode {
+	node := parseAssignOnly()
+	if node != nil {
+		if peek() == T_SEMICOLON {
+			_ = ntk()
+		}
+	}
+	return node
+}
+
 func parseReturnStmt() astNode {
 	cursor := mainCursor
 	node := astReturn{}
@@ -568,7 +300,7 @@ func parseReturnStmt() astNode {
 		if stmt := parseExpression(); stmt != nil {
 			s := stmt.(astExpression)
 			node.Stmt = &s
-			if peek() == T_COMA {
+			if peek() == T_SEMICOLON {
 				_ = ntk()
 			}
 		}
@@ -576,49 +308,6 @@ func parseReturnStmt() astNode {
 	}
 	mainCursor = cursor
 	return nil
-}
-
-func parseFuncDecl() astNode {
-
-	cursor := mainCursor
-	node := astFuncDecl{}
-	if ntk() == T_FUNC_DEC {
-		if ntk() == T_FUNC_CALL {
-			node.Name = tokens[mainCursor-1].Value
-			if ntk() == T_LPAR {
-				if n := parseFuncDeclArgs(); n != nil {
-					if !(ntk() == T_RPAR && ntk() == T_LBRACE) {
-						goto fail
-					}
-
-					node.Args = n.(astFuncDeclArgs)
-
-					if nBody := parseBody(); nBody != nil {
-						node.Body = nBody.(astBody)
-					} else {
-						goto fail
-					}
-
-					if ntk() == T_RBRACE {
-						return node
-					}
-				}
-			}
-		}
-	}
-fail:
-	mainCursor = cursor
-	return nil
-}
-
-func parseAssign() astNode {
-	node := parseAssignOnly()
-	if node != nil {
-		if peek() == T_COMA {
-			_ = ntk()
-		}
-	}
-	return node
 }
 
 func parseAssignOnly() astNode {
@@ -679,8 +368,8 @@ func parseVarArrayIndex() astNode {
 			tokens[mainCursor-1],
 		}
 
-		if ntk() == T_LINDEX {
-			if node := parseExpression(); node != nil && ntk() == T_RINDEX {
+		if ntk() == T_LBRACK {
+			if node := parseExpression(); node != nil && ntk() == T_RBRACK {
 				return astVarArrayIndex{
 					index: node.(astExpression),
 					value: varDecl,
@@ -728,11 +417,11 @@ func parseExpression() astNode {
 	for mainCursor < maxCursor {
 		cc := mainCursor
 		nLitNode := parseLit()
-		if (nLitNode != nil && peek() == T_COMA) || nLitNode != nil {
+		if (nLitNode != nil && peek() == T_SEMICOLON) || nLitNode != nil {
 			if nOpNode := parseIsOp(); nOpNode != nil {
 				node = append(node, nLitNode)
 				node = append(node, nOpNode)
-				continue
+				continue //
 			}
 		}
 		// rollback
@@ -749,19 +438,20 @@ func parseExpression() astNode {
 }
 
 func isUnary(tokenType string) bool {
-	// todo "!" is unary as well
 	switch tokenType {
-	case T_MINUS, T_NOT:
+	case T_SUB, T_NOT:
 		return true
 	}
 	return false
 }
 
+// cleanup this, not very clean
+// this should be supported in the lexer
 func parseIsOp() astNode {
 	t := peek()
 	node := astOp{}
 	switch t {
-	case T_MINUS, T_PLUS, T_MULT, T_DIV, T_EQ, T_GT, T_GTE, T_LTE, T_LT, T_MOD:
+	case T_SUB, T_ADD, T_MUL, T_QUO, T_EQ, T_GT, T_GTE, T_LTE, T_LT, T_MOD:
 		node.Token = tokens[mainCursor]
 		_ = ntk()
 		return node
@@ -777,7 +467,8 @@ func parseArrayDecl() astNode {
 	return nil
 }
 
-func parseLit0() astNode {
+// rename to basicLiteral
+func parseBasicLiteral() astNode {
 	c := mainCursor
 	node := astLiteral{}
 
@@ -807,7 +498,7 @@ func parseLit0() astNode {
 func parseLit() astNode {
 	c := mainCursor
 	var u *astUnary
-
+	// keep parsing Unary ops
 	for {
 		if isUnary(peek()) {
 			if u != nil {
@@ -826,7 +517,7 @@ func parseLit() astNode {
 		}
 	}
 
-	lit0 := parseLit0()
+	lit0 := parseBasicLiteral()
 	if lit0 == nil {
 		goto fail
 	}
@@ -859,9 +550,9 @@ fail:
 
 func parseGroup() astNode {
 	c := mainCursor
-	if ntk() == T_LPAR {
+	if ntk() == T_LPAREN {
 		nGroup := astLitGroup{}
-		if n := parseExpression(); n != nil && ntk() == T_RPAR {
+		if n := parseExpression(); n != nil && ntk() == T_RPAREN {
 			nGroup.Value = n
 			return nGroup
 		}
@@ -874,8 +565,8 @@ func parseFuncCall() astNode {
 	c := mainCursor
 	node := astFuncCall{}
 	tok := tokens[mainCursor]
-	if ntk() == T_FUNC_CALL && ntk() == T_LPAR {
-		if n := parseFuncCallArgs(); n != nil && ntk() == T_RPAR {
+	if ntk() == T_FUNC_CALL && ntk() == T_LPAREN {
+		if n := parseFuncCallArgs(); n != nil && ntk() == T_RPAREN {
 			node.Args = n.(astFunCallArgs)
 			node.Name = tok.Value
 			return node
@@ -888,7 +579,7 @@ func parseFuncCall() astNode {
 func parseFuncCallArgs() astNode {
 	c := mainCursor
 	node := astFunCallArgs{}
-	if peek() == T_RPAR {
+	if peek() == T_RPAREN {
 		return node
 	}
 	found := false
@@ -896,7 +587,7 @@ func parseFuncCallArgs() astNode {
 		if n := parseExpression(); n != nil {
 			node = append(node, n.(astExpression))
 			found = true
-			if peek() == T_SEMI {
+			if peek() == T_COMMA {
 				_ = ntk()
 				continue
 			}
@@ -913,10 +604,10 @@ func parseFuncCallArgs() astNode {
 func parseElseIf() astNode {
 	c := mainCursor
 	node := astElseIf{}
-	if ntk() == T_ELSE && ntk() == T_IF && ntk() == T_LPAR {
+	if ntk() == T_ELSE && ntk() == T_IF && ntk() == T_LPAREN {
 		if cond := parseExpression(); cond != nil {
 			node.Cond = cond
-			if ntk() == T_RPAR && ntk() == T_LBRACE {
+			if ntk() == T_RPAREN && ntk() == T_LBRACE {
 				if body := parseBody(); body != nil && ntk() == T_RBRACE {
 					node.Body = body.(astBody)
 					return node
@@ -947,10 +638,10 @@ func parseElse() astNode {
 func parseIf() astNode {
 	c := mainCursor
 	node := astIf{}
-	if ntk() == T_IF && ntk() == T_LPAR {
+	if ntk() == T_IF && ntk() == T_LPAREN {
 		if cond := parseExpression(); cond != nil {
 			node.Cond = cond
-			if ntk() == T_RPAR && ntk() == T_LBRACE {
+			if ntk() == T_RPAREN && ntk() == T_LBRACE {
 				if body := parseBody(); body != nil && ntk() == T_RBRACE {
 					node.Body = body.(astBody)
 					// check for elseif's
@@ -979,13 +670,13 @@ func parseIf() astNode {
 func parseFor() astNode {
 	c := mainCursor
 	node := astFor{}
-	if ntk() == T_FOR && ntk() == T_LPAR {
+	if ntk() == T_FOR && ntk() == T_LPAREN {
 		if nAssign := parseAssignOnly(); nAssign != nil && parseComa() {
 			node.Pre = nAssign
 			if nExpress := parseExpression(); nExpress != nil {
 				if parseComa() {
 					node.Cond = nExpress
-					if nAssign := parseAssignOnly(); nAssign != nil && ntk() == T_RPAR && ntk() == T_LBRACE {
+					if nAssign := parseAssignOnly(); nAssign != nil && ntk() == T_RPAREN && ntk() == T_LBRACE {
 						node.Post = nAssign
 						if nBody := parseBody(); nBody != nil && ntk() == T_RBRACE {
 							node.Body = nBody.(astBody)
@@ -1003,7 +694,7 @@ func parseFor() astNode {
 
 func parseComa() bool {
 	c := mainCursor
-	if peek() == T_COMA {
+	if peek() == T_SEMICOLON {
 		_ = ntk()
 		return true
 	}
@@ -1015,7 +706,7 @@ func parseFuncDeclArgs() astNode {
 
 	c := mainCursor
 	node := astFuncDeclArgs{}
-	if current() == T_LPAR && peek() == T_RPAR {
+	if current() == T_LPAREN && peek() == T_RPAREN {
 		return node
 	}
 	for mainCursor < maxCursor {
@@ -1023,15 +714,15 @@ func parseFuncDeclArgs() astNode {
 			node = append(node, astVarDec{
 				tokens[mainCursor-1],
 			})
-			if peek() == T_RPAR {
+			if peek() == T_RPAREN {
 				return node
 			}
 
-			if peek() != T_SEMI && ntk() == T_LPAR {
+			if peek() != T_COMMA && ntk() == T_LPAREN {
 				return node
 			}
 
-			if peek() == T_SEMI {
+			if peek() == T_COMMA {
 				_ = ntk()
 				continue
 			}

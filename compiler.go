@@ -16,7 +16,7 @@ const (
 	opSUB
 	opSUBUnary
 	opMUL
-	opDIV
+	opQUO
 	opCALL
 	opLABEL
 	opLT
@@ -41,7 +41,7 @@ var opNames = map[int]string{
 	opSUB:      "SUB",
 	opSUBUnary: "SUBUnary",
 	opMUL:      "MUL",
-	opDIV:      "DIV",
+	opQUO:      "QUO",
 	opCALL:     "CALL",
 	opLABEL:    "__LABEL__",
 	opLT:       "LT",
@@ -66,38 +66,38 @@ type funcFrame struct {
 	len     int
 }
 
-type vmLocals map[localVar]interface{}
+type vmLocals map[localVar]any
 
 // linked list is better, but let's try with a stack (since we love stack's)
 type locals struct {
-	store IStack
+	store Stack[vmLocals]
 }
 
-func (l *locals) get(name localVar) (interface{}, bool) {
+func (l *locals) get(name localVar) (any, bool) {
 	for i := l.store.Len() - 1; i >= 0; i-- {
-		ll := l.store[i].(vmLocals)
+		ll := l.store.AtIndex(i)
 		if el, ok := ll[name]; ok {
 			return el, true
 		}
 	}
-	return nil, false
+	return VMValue{value: nil, kind: T_UNDEFINED}, false
 }
 
 // set will always use the last item as store
-func (l *locals) set(name localVar, value interface{}) {
-	ll := l.store[l.store.Len()-1].(vmLocals)
+func (l *locals) set(name localVar, value any) {
+	ll := l.store.Tail()
 	ll[name] = value
 }
 
 func (l *locals) pop() vmLocals {
-	return l.store.Pop().(vmLocals)
+	return l.store.Pop()
 }
 
 type stackFrame struct {
 	locals       locals
 	name         string
 	funcReturnPC *int
-	callStack    IStack
+	callStack    Stack[any]
 	rsp          int
 }
 
@@ -106,7 +106,7 @@ type Compiler struct {
 	pc        int // program counter
 	program   []command
 	funcs     map[string]funcFrame
-	funcCalls IStack // caller/callee and also to save pc address
+	funcCalls Stack[any] // caller/callee and also to save pc address
 	currRSP   *int
 	currRBP   int // register stack base pointer
 	bytecode  []command
@@ -114,13 +114,13 @@ type Compiler struct {
 
 type command struct {
 	code int
-	op1  interface{}
-	op2  interface{}
-	op3  interface{}
-	op4  interface{}
-	op5  interface{}
-	rbp  interface{}
-	rsp  interface{}
+	op1  any
+	op2  any
+	op3  any
+	op4  any
+	op5  any
+	rbp  any
+	rsp  any
 }
 
 func (c *Compiler) Push(cmd command) {
@@ -141,7 +141,7 @@ func (c *Compiler) Push(cmd command) {
 		case opPOP, opCMP:
 			*c.currRSP--
 
-		case opSUB, opADD, opMUL, opDIV, opLT, opLTE, opGT, opGTE:
+		case opSUB, opADD, opMUL, opQUO, opLT, opLTE, opGT, opGTE:
 			// POP then POP then PUSH ( in 2 operands => out 1 operand)
 			*c.currRSP--
 		}
@@ -165,8 +165,8 @@ func (c *Compiler) Run(tree []astNode) {
 
 	// init global store frame
 	stack := &stackFrame{
-		locals:    locals{store: IStack{}},
-		callStack: IStack{},
+		locals:    locals{store: Stack[vmLocals]{}},
+		callStack: Stack[any]{},
 	}
 
 	stack.locals.store.Push(vmLocals{})
@@ -336,13 +336,13 @@ func expand(s astCapturedGroupNode) astStack {
 func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 	// every expression inside parentheses will be converted to postfix notation
 
-	ss := StackFloat{}
+	ss := Stack[any]{}
 	for i := 0; i < postfix.len(); i++ {
 		node := postfix.atIndex(i)
 		switch node.(type) {
 		case astUnary, *astUnary:
 			op1 := ss.Pop()
-			ss.Push(-op1)
+			ss.Push(op1)
 			c.Push(command{
 				code: opSUBUnary,
 				op1:  op1,
@@ -353,30 +353,30 @@ func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 			op1 := ss.Pop()
 
 			switch n.Token.Kind {
-			case T_PLUS:
+			case T_ADD:
 				ss.Push(op1)
 				c.Push(command{
 					code: opADD,
 					op1:  op1,
 					op2:  op2,
 				})
-			case T_MINUS:
+			case T_SUB:
 				ss.Push(op1)
 				c.Push(command{
 					code: opSUB,
 					op1:  op1,
 					op2:  op2,
 				})
-			case T_MULT:
+			case T_MUL:
 				ss.Push(op1)
 				c.Push(command{
 					code: opMUL,
 					op1:  op1,
 					op2:  op2,
 				})
-			case T_DIV:
+			case T_QUO:
 				c.Push(command{
-					code: opDIV,
+					code: opQUO,
 					op1:  op1,
 					op2:  op2,
 				})
@@ -438,6 +438,7 @@ func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 				op1:  n.Name,
 				op2:  n.Args, // keep it
 			})
+
 			if n.Name != "runtime.array" {
 				for i := 0; i < len(n.Args); i++ {
 					c.Push(command{
@@ -446,45 +447,48 @@ func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 					})
 				}
 			}
-
 		case astValue:
 			n := node.(astValue)
-			var source interface{}
-			var desc interface{}
+			var source any
 			nKind := n.Value.Kind
 			switch nKind {
 			case T_VAR:
 				varName := n.Value.Value
 				if location, ok := frame.locals.get(localVar(varName)); ok {
 					source = location
-					desc = fmt.Sprintf(`ploc %s`, varName)
 				} else {
-					desc = fmt.Sprintf(`call undef var %s`, varName)
+					err := fmt.Errorf(`call undef var %s`, varName)
+					fmt.Println(err)
 				}
-			case T_NUMBER:
-				source, _ = strconv.ParseFloat(n.Value.Value, 32)
-				desc = fmt.Sprintf(`NUMBER`)
-			case T_STRING:
-				source = n.Value.Value
-				desc = fmt.Sprintf(`STRING`)
+			case T_NUMBER, T_STRING:
+				var v any = n.Value.Value
+				if nKind == T_NUMBER {
+					// check parse int
+					ii, err := strconv.ParseInt(n.Value.Value, 10, 64)
+					if err == nil {
+						v = int(ii)
+					} else {
+						v, _ = strconv.ParseFloat(n.Value.Value, 64)
+					}
+				}
+				source = VMValue{
+					kind:  n.Value.Kind,
+					value: v,
+				}
+
 			default:
 				panic("got unknown astValue kind")
 			}
 			c.Push(command{
 				code: opPUSH,
 				op1:  source,
-				op2:  desc,
 			})
-			val, _ := strconv.ParseFloat(n.Value.Value, 32)
-			ss.Push(float32(val))
+			ss.Push(n.Value.Value)
 		}
 	}
 }
 
 func convertToPostfix(stack astStack) astStack {
-	isWeak := func(op astOp) bool {
-		return op.Token.Kind == T_PLUS || op.Token.Kind == T_MINUS
-	}
 
 	postfixStack := astStack{}
 	pStack := astStack{}
@@ -505,7 +509,7 @@ func convertToPostfix(stack astStack) astStack {
 						break
 					}
 
-					if !(!isWeak(node.(astOp)) && isWeak(lastOp)) {
+					if node.(astOp).Prec() < lastOp.Prec() {
 						postfixStack.push(pStack.pop())
 					} else {
 						break
@@ -613,7 +617,7 @@ func (c *Compiler) genAssign(frame *stackFrame, node astAssign) {
 				op1:  arrIndex(name),
 				op2:  fmt.Sprintf(`arr loc %s`, name),
 			})
-			frame.locals.set(vName, nil)
+			frame.locals.set(vName, VMValue{})
 		}
 	}
 }
@@ -673,7 +677,9 @@ func (c *Compiler) genFor(frame *stackFrame, body astFor) {
 		op1:  endOfFor,
 	})
 
+	c.startCxt(frame)
 	c.genBody(frame, body.Body)
+	c.endCtx(frame)
 
 	switch body.Post.(type) {
 	case astAssign:
@@ -687,73 +693,81 @@ func (c *Compiler) genFor(frame *stackFrame, body astFor) {
 	})
 
 	*endOfFor = c.pc
-	c.endCtx(frame)
+	c.endCtx(frame) // `for` block will create local variables on the stack, so make sure to always cleanup
 }
 
 func intP() *int {
-	i := 0
+	i := -1 // use -1 as variable not set, because 0 can interfere with value of 0
 	return &i
 }
 
 func (c *Compiler) genIf(frame *stackFrame, node astIf) {
-	c.startCxt(frame)
+
 	// condition
 	c.genExpression(frame, node.Cond.(astExpression))
-	if1 := intP()
-	ifOnly := true
+
+	endOfIf := intP() // keep a pointer for branching address, and then update once code is generated :)
+	next := intP()
+
 	c.Push(command{
 		code: opCMP,
-		op1:  if1,
+		op1:  next,
 	})
 
+	c.startCxt(frame)
 	c.genBody(frame, node.Body)
-	endOfIf := intP()
+	c.endCtx(frame)
+
 	c.Push(command{
 		code: opJUMP,
 		op1:  endOfIf,
 	})
 
 	if node.ElseIfs != nil {
-		*if1 = c.pc
-		ifOnly = false
+		*next = c.pc
 		for i := 0; i < len(node.ElseIfs); i++ {
-			c.startCxt(frame)
-			elseIf := intP()
+			endOfElseIf := intP()
 			n := node.ElseIfs[i]
 			c.genExpression(frame, n.Cond.(astExpression))
 			c.Push(command{
 				code: opCMP,
-				op1:  elseIf,
+				op1:  endOfElseIf,
 			})
+
+			c.startCxt(frame)
 			c.genBody(frame, n.Body)
+			c.endCtx(frame)
+
 			c.Push(command{
 				code: opJUMP,
 				op1:  endOfIf,
 			})
-			c.endCtx(frame)
-			*elseIf = c.pc
+			*endOfElseIf = c.pc
 		}
 	}
 
 	if node.Else.Body != nil {
-		ifOnly = false
-		if node.ElseIfs == nil {
-			*if1 = c.pc
+		// in case of no available elseif block
+		if *next == -1 {
+			*next = c.pc
 		}
+
 		c.startCxt(frame)
 		c.genBody(frame, node.Else.Body)
 		c.endCtx(frame)
 	}
-	c.endCtx(frame)
 	*endOfIf = c.pc
 
-	if ifOnly {
-		*if1 = c.pc
+	// in case of an if-only block
+	if *next == -1 {
+		*next = c.pc
 	}
 }
+
 func (c *Compiler) startCxt(frame *stackFrame) {
 	frame.locals.store.Push(vmLocals{})
 }
+
 func (c *Compiler) endCtx(frame *stackFrame) {
 	dd := frame.locals.pop()
 	// clean context local vars

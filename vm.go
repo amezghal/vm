@@ -2,57 +2,47 @@ package main
 
 import (
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 )
 
 const stackSize = 1024
 
 type VMStack struct {
-	data     [stackSize]interface{}
-	rbp      int
-	rsp      int
-	maxStack int
+	data [stackSize]any
+	rbp  int // stack base pointer
+	rsp  int // stack pointer
 }
 
-func (s *VMStack) Push(value interface{}) {
+func (s *VMStack) Push(value any) {
+	if s.rsp > stackSize-1 {
+		panic("out of stack")
+	}
 	s.data[s.rsp] = value
 	s.rsp++
-	if s.rsp > s.maxStack {
-		s.maxStack = s.rsp
-	}
 }
 
-func (s *VMStack) Pop() interface{} {
+func (s *VMStack) Pop() any {
 	s.rsp--
 	ret := s.data[s.rsp]
 	s.data[s.rsp] = nil
 	return ret
 }
 
-func (s *VMStack) GetAtRealIndex(index int) interface{} {
+func (s *VMStack) GetAtRealIndex(index int) any {
 	return s.data[index]
 }
 
-func (s *VMStack) GetAtIndex(index int) interface{} {
+func (s *VMStack) GetAtIndex(index int) any {
 	return s.data[s.rbp+index]
 }
 
-func (s *VMStack) SetAtRealIndex(index int, value interface{}) {
+func (s *VMStack) SetAtRealIndex(index int, value any) {
 	s.data[index] = value
 }
 
-func (s *VMStack) SetAtIndex(index int, value interface{}) {
+func (s *VMStack) SetAtIndex(index int, value any) {
 	dx := s.rbp + index
-	if dx < 0 {
-		fmt.Println("here")
-	}
 	s.data[dx] = value
-}
-
-func (s *VMStack) Len() int {
-	return len(s.data)
 }
 
 type funcCall struct {
@@ -62,24 +52,23 @@ type funcCall struct {
 }
 
 type VM struct {
-	pc        int
+	pc        int // program counter
 	stack     VMStack
-	heap      map[string]map[int]interface{}
-	callStack IStack
+	heap      map[string]map[int]any // heap is where we store array's
+	callStack Stack[any]
 	output    strings.Builder
 }
 
 var i = 0
 
 func (vm *VM) display(cc command, isVM bool) {
-	return
-	var args []interface{}
+	var args []any
 	args = append(args, i)
 	i++
 
 	cmd := cc.code
 	switch cmd {
-	case opSUB, opADD, opMUL, opDIV, opLT, opLTE, opGT, opGTE:
+	case opSUB, opADD, opMUL, opQUO, opLT, opLTE, opGT, opGTE:
 		cc.op1 = nil
 		cc.op2 = nil
 	}
@@ -113,17 +102,6 @@ func (vm *VM) display(cc command, isVM bool) {
 	}
 
 	var ss []string
-	if !isVM {
-		for i := vm.stack.rbp; i < vm.stack.rsp; i++ {
-			val := vm.stack.GetAtRealIndex(i)
-			if val == nil {
-				val = "X"
-			} else if _, ok := val.(nilValue); ok {
-				val = "@"
-			}
-			ss = append(ss, fmt.Sprintf(`%v`, val))
-		}
-	}
 
 	ex := fmt.Sprintf(`RBP=%d:%d | RSP=%d:%d %s`, vm.stack.rbp, cc.rbp, vm.stack.rsp, cc.rsp, strings.Join(ss, "|"))
 	args = append(args, ex)
@@ -134,13 +112,13 @@ func (vm *VM) display(cc command, isVM bool) {
 
 func (vm *VM) Run(bytecode []command, funcs map[string]funcFrame) {
 	vm.stack = VMStack{
-		data: [stackSize]interface{}{},
+		data: [stackSize]any{},
 		rbp:  0,
 		rsp:  0,
 	}
-	vm.callStack = IStack{}
+	vm.callStack = Stack[any]{}
 	// init heap
-	vm.heap = map[string]map[int]interface{}{}
+	vm.heap = map[string]map[int]any{}
 	for i := 0; i < len(bytecode); i++ {
 		cmd := bytecode[i]
 		vm.display(cmd, true)
@@ -151,12 +129,13 @@ func (vm *VM) Run(bytecode []command, funcs map[string]funcFrame) {
 mainLoop:
 	for vm.pc < len(bytecode) {
 		lk++
-		if lk > 30000 {
+		if lk > 300000 {
 			fmt.Println("possible VM infinite loop")
 			break
 		}
 		cmd := bytecode[vm.pc]
 		op1, op2 := cmd.op1, cmd.op2
+
 		switch cmd.code {
 		case opPOP:
 			value := vm.stack.Pop()
@@ -179,61 +158,23 @@ mainLoop:
 				v := int(op2.(RBP))
 				vm.stack.Push(vm.stack.GetAtIndex(v))
 			case arrIndex:
-				vm.stack.Push(op1.(arrIndex))
+				vm.stack.Push(VMValue{kind: T_STRING, value: op1.(arrIndex)})
+			case nilValue:
+				vm.stack.Push(VMValue{kind: T_UNDEFINED, value: nil})
+			case VMValue:
+				vm.stack.Push(op1.(VMValue))
 			default:
-				vm.stack.Push(op1)
+				vm.stack.Push(op1.(VMValue))
 			}
 		case opARRAY:
 			arrayName := op1.(string)
-			vm.heap[arrayName] = make(map[int]interface{}, 100)
-		case opADD, opSUB, opMUL, opDIV, opLT, opLTE, opGT, opGTE, opEQ, opMOD:
+			vm.heap[arrayName] = make(map[int]any, 100)
+		case opADD, opSUB, opMUL, opQUO, opMOD, opLT, opLTE, opGT, opGTE, opEQ:
 			operand2 := vm.stack.Pop()
 			operand1 := vm.stack.Pop()
 
-			var o1, o2 = f32(operand1), f32(operand2)
+			value := Arith(cmd.code, operand1.(VMValue), operand2.(VMValue))
 
-			var value float32
-			if cmd.code == opADD {
-				value = o1 + o2
-			} else if cmd.code == opSUB {
-				value = o1 - o2
-			} else if cmd.code == opMUL {
-				value = o1 * o2
-			} else if cmd.code == opDIV {
-				value = o1 / o2
-			} else if cmd.code == opMOD {
-				value = f32(math.Mod(float64(o1), float64(o2)))
-			} else if cmd.code == opLT {
-				if o1 < o2 {
-					value = 1
-				} else {
-					value = 0
-				}
-			} else if cmd.code == opLTE {
-				if o1 <= o2 {
-					value = 1
-				} else {
-					value = 0
-				}
-			} else if cmd.code == opGT {
-				if o1 > o2 {
-					value = 1
-				} else {
-					value = 0
-				}
-			} else if cmd.code == opGTE {
-				if o1 >= o2 {
-					value = 1
-				} else {
-					value = 0
-				}
-			} else if cmd.code == opEQ {
-				if o1 == o2 {
-					value = 1
-				} else {
-					value = 0
-				}
-			}
 			vm.stack.Push(value)
 		case opCALL:
 			switch op1.(string) {
@@ -243,43 +184,66 @@ mainLoop:
 				arrayName := string(args[0][0].(astFuncArgValue))
 				method := string(args[1][0].(astFuncArgValue))
 
+				getIndex := func(indexRaw any) int {
+					var index int
+					switch indexRaw.(type) {
+					case VMValue:
+						index = indexRaw.(VMValue).value.(int)
+					case int:
+						index = indexRaw.(int)
+					default:
+						panic("array index type not a an INT")
+					}
+					return index
+				}
+
 				self := vm.heap[arrayName]
 				switch method {
 				case "get":
-					index := int(f32(vm.stack.GetAtRealIndex(vm.stack.rsp - 2)))
+					index := getIndex(vm.stack.GetAtRealIndex(vm.stack.rsp - 2))
 					value := self[index]
+					if value == nil {
+						fmt.Println(fmt.Sprintf(`index out of range array:%s index:%d`, arrayName, index))
+						value = VMValue{kind: T_UNDEFINED, value: nil}
+					}
 					vm.stack.Pop()
 					vm.stack.Pop()
 					vm.stack.Push(value)
 				case "set":
-					index := int(f32(vm.stack.Pop()))
+					index := getIndex(vm.stack.Pop())
 					value := vm.stack.Pop()
 					self[index] = value
 				}
 			case "printf":
 				ret := vm.stack.Pop()
 				val := vm.stack.Pop()
-				vm.output.WriteString(fmt.Sprintf(`%v `, val))
+				//vm.output.WriteString(fmt.Sprintf(`%v `, val))
+				fmt.Println(fmt.Sprintf(` VM -> %v `, val))
+				// to align with function calls conventions, we need tow push to the stack
+				vm.stack.Push(ret)
 				vm.stack.Push(ret)
 			default:
-				vm.callStack.Push(funcCall{
-					pc:  vm.pc + 1,    // next instruction
-					rbp: vm.stack.rbp, // current store rbp
-					rsp: vm.stack.rsp,
-				})
+				if calledFunc, ok := funcs[op1.(string)]; ok {
+					vm.callStack.Push(funcCall{
+						pc:  vm.pc + 1,    // next instruction
+						rbp: vm.stack.rbp, // current store rbp
+						rsp: vm.stack.rsp,
+					})
 
-				vm.stack.rbp = vm.stack.rsp
+					vm.stack.rbp = vm.stack.rsp
 
-				funcPC := funcs[op1.(string)].pc
-				vm.pc = funcPC
-				goto exitLoop
+					funcPC := calledFunc.pc
+					vm.pc = funcPC
+					goto exitLoop
+				} else {
+					panic(fmt.Sprintf(`call to undefined function %s`, op1.(string)))
+				}
 			}
 
 		case opCMP:
 			operand1 := vm.stack.Pop()
-			o1 := f32(operand1)
-			jumpTo := *op1.(*int)
-			if o1 <= 0 {
+			if operand1.(VMValue).value.(int) <= 0 {
+				jumpTo := *op1.(*int)
 				vm.pc = jumpTo
 				goto exitLoop
 			}
@@ -289,8 +253,7 @@ mainLoop:
 			goto exitLoop
 		case opSUBUnary:
 			operand1 := vm.stack.Pop()
-			o1 := f32(operand1)
-			o1 *= -1
+			o1 := Arith(opMUL, VMValue{kind: T_NUMBER, value: -1}, operand1.(VMValue))
 			vm.stack.Push(o1)
 		case opLEAVE:
 			if vm.callStack.Len() > 0 {
@@ -305,29 +268,11 @@ mainLoop:
 			vm.pc = *op
 			goto exitLoop
 		case opHALT:
-			vm.display(cmd, false)
 			break mainLoop
 		}
 		vm.pc++
 	exitLoop:
-		vm.display(cmd, false)
+		//vm.display(cmd, false)
 	}
-	fmt.Println("RESULT = " + vm.output.String())
-}
-
-func f32(val interface{}) float32 {
-	switch val.(type) {
-	case float64:
-		return float32(val.(float64))
-	case float32:
-		return val.(float32)
-	case int:
-		return float32(val.(int))
-	default:
-		f, err := strconv.ParseFloat(fmt.Sprintf(`%d`, val), 32)
-		if err == nil {
-			panic("cannot parse float")
-		}
-		return float32(f)
-	}
+	fmt.Println(vm.output.String())
 }
