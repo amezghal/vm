@@ -7,56 +7,63 @@ import (
 )
 
 const (
-	T_NAN       = "__NAN__"
-	T_UNDEFINED = "__UNDEFINED__"
-	T_IF        = "__IF__"
-	T_ELSE      = "__ELSE__"
-	T_RETURN    = "__RETURN__"
-	T_LBRACE    = "__{__"
-	T_RBRACE    = "__}__"
-	T_LBRACK    = "__[__"
-	T_RBRACK    = "__]__"
-	T_LPAREN    = "__(__"
-	T_RPAREN    = "__)__"
+	T_NAN       = "T_NAN"
+	T_UNDEFINED = "T_UNDEFINED"
+	T_IF        = "T_IF"
+	T_ELSE      = "T_ELSE"
+	T_RETURN    = "T_RETURN"
+	T_LBRACE    = "T_{"
+	T_RBRACE    = "T_}"
+	T_LBRACK    = "T_["
+	T_RBRACK    = "T_]"
+	T_LPAREN    = "T_("
+	T_RPAREN    = "T_)"
 
-	T_ARRAY     = "__[]__"
-	T_NOT       = "__!__"
-	T_AND       = "__and__"
-	T_OR        = "__or__"
-	T_SEMICOLON = "__;__"
-	T_COMMA     = "__,__"
-	T_ASSIGN    = "__=__"
-	T_EQ        = "__==__"
+	T_ARRAY     = "T_[]"
+	T_NOT       = "T_!"
+	T_AND       = "T_and"
+	T_OR        = "T_or"
+	T_SEMICOLON = "T_;"
+	T_COMMA     = "T_,"
+	T_ASSIGN    = "T_="
+	T_EQ        = "T_=="
 	T_LT        = "<"
 	T_GT        = ">"
 	T_LTE       = "<="
 	T_GTE       = ">="
-	T_LET       = "__LET__"
-	T_FOR       = "__FOR__"
+	T_LET       = "T_LET"
+	T_FOR       = "T_FOR"
 
-	T_FUNC_CALL = "__FUNC_CALL__"
-	T_FUNC_DEC  = "__FUNC_DEC__"
-	T_ADD       = "__+__"
-	T_SUB       = "__-__"
-	T_MUL       = "__*__"
-	T_QUO       = "__/__"
-	T_MOD       = "__%__"
-	T_VAR       = "__VAR__"
-	T_NUMBER    = "__NUMBER__"
-	T_UNARY     = "__UNARY__"
-	T_STRING    = "__STRING__"
+	T_FUNC_CALL = "T_FUNC_CALL"
+	T_FUNC_DEC  = "T_FUNC_DEC"
+	T_ADD       = "T_+"
+	T_SUB       = "T_-"
+	T_MUL       = "T_*"
+	T_QUO       = "T_/"
+	T_MOD       = "T_%"
+	T_VAR       = "T_VAR"
+	T_NUMBER    = "T_NUMBER"
+	T_STRING    = "T_STRING"
+	T_COMMENT   = "T_COMMENT"
 )
 
 type Token struct {
 	Kind  string
 	Value string
-	Pos   int
 	Line  int
 	Col   int
 }
 
 func (t *Token) String() string {
-	return fmt.Sprintf(`Token kind=%s, value=%s, pos=%d`, t.Kind, t.Value, t.Pos)
+	return fmt.Sprintf(`Token kind=%s, value=%s`, t.Kind, t.Value)
+}
+
+func (t *Token) IsOp() bool {
+	switch t.Kind {
+	case T_SUB, T_ADD, T_MUL, T_QUO, T_EQ, T_GT, T_GTE, T_LTE, T_LT, T_MOD, T_OR, T_AND:
+		return true
+	}
+	return false
 }
 
 type Lexer struct {
@@ -73,19 +80,33 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 	l.line = 1
 
 	var tokens []Token
+	lastTokensLen := 0
+	shouldAddSemiColon := true
 	for ; l.cursor < len(l.source); l.cursor++ {
 		col := l.col
 		line := l.line
 		char := l.getCurrentChar()
-		if char == '"' {
+
+		switch char {
+		case '/':
+			if l.peek() == '/' {
+				_ = l.parseLineComment()
+				//tokens = append(tokens, Token{
+				//	Kind:  T_COMMENT,
+				//	Value: l.parseLineComment(),
+				//	Line:  line,
+				//	Col:   col,
+				//})
+				shouldAddSemiColon = false
+			}
+		case '"':
 			tokens = append(tokens, Token{
 				Kind:  T_STRING,
 				Value: l.parseString(),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == '=' {
+		case '=':
 			tValue := string(char)
 			tKind := T_ASSIGN
 			if l.peek() == '=' {
@@ -97,12 +118,11 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			tokens = append(tokens, Token{
 				Kind:  tKind,
 				Value: tValue,
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
 
-		} else if char == '<' || char == '>' {
+		case '<', '>':
 			tValue := string(char)
 			tKind := T_LT
 
@@ -127,83 +147,63 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			tokens = append(tokens, Token{
 				Kind:  tKind,
 				Value: tValue,
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if unicode.IsDigit(rune(char)) {
-			tokens = append(tokens, Token{
-				Kind:  T_NUMBER,
-				Value: l.parseNumber(),
-				Pos:   0,
-				Line:  line,
-				Col:   col,
-			})
-		} else if char == '(' {
+		case '(':
 			tokens = append(tokens, Token{
 				Kind:  T_LPAREN,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == ')' {
+		case ')':
 			tokens = append(tokens, Token{
 				Kind:  T_RPAREN,
 				Value: string(char),
-				Pos:   0,
-				Line:  line,
-				Col:   col,
+
+				Line: line,
+				Col:  col,
 			})
-		} else if isOp, opValue := parseOp(char); isOp {
-			tokens = append(tokens, Token{
-				Kind:  opValue,
-				Value: string(char),
-				Pos:   0,
-				Line:  line,
-				Col:   col,
-			})
-		} else if char == ';' {
+		case ';':
 			tokens = append(tokens, Token{
 				Kind:  T_SEMICOLON,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == ',' {
+			shouldAddSemiColon = false
+		case ',':
 			tokens = append(tokens, Token{
 				Kind:  T_COMMA,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == '{' {
+		case '{':
 			tokens = append(tokens, Token{
 				Kind:  T_LBRACE,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == '}' {
+			shouldAddSemiColon = false
+		case '}':
 			tokens = append(tokens, Token{
 				Kind:  T_RBRACE,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == '!' {
+			shouldAddSemiColon = false
+		case '!':
 			tokens = append(tokens, Token{
 				Kind:  T_NOT,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == '[' {
+		case '[':
 			tKind := T_LBRACK
 			tValue := string(char)
 			if l.peek() == ']' {
@@ -214,61 +214,104 @@ func (l *Lexer) Run(code []byte) ([]Token, error) {
 			tokens = append(tokens, Token{
 				Kind:  tKind,
 				Value: tValue,
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if char == ']' {
+		case ']':
 			tokens = append(tokens, Token{
 				Kind:  T_RBRACK,
 				Value: string(char),
-				Pos:   0,
 				Line:  line,
 				Col:   col,
 			})
-		} else if isLiteral(string(char)) {
-			kind := T_FUNC_CALL
-			value := l.parseLiteral()
-
-			peekNonWSValue := l.peekNonWS()
-			peek := l.peek()
-
-			switch {
-			case value == "let" && isWS(peek):
-				kind = T_LET
-			case value == "for" && peekNonWSValue == '(':
-				kind = T_FOR
-			case value == "fn" && isWS(peek):
-				kind = T_FUNC_DEC
-			case value == "return" && isWS(peek):
-				kind = T_RETURN
-			case value == "if" && peekNonWSValue == '(':
-				kind = T_IF
-			case value == "else":
-				kind = T_ELSE
-			case value == "and":
-				kind = T_AND
-			case value == "or":
-				kind = T_OR
-
-			case peekNonWSValue != '(':
-				kind = T_VAR
+		case '|':
+			if l.peek() == '|' {
+				l.readChar()
+				tokens = append(tokens, Token{
+					Kind:  T_OR,
+					Value: "||",
+					Line:  line,
+					Col:   col,
+				})
+			}
+		case '&':
+			if l.peek() == '&' {
+				l.readChar()
+				tokens = append(tokens, Token{
+					Kind:  T_AND,
+					Value: "&&",
+					Line:  line,
+					Col:   col,
+				})
+			}
+		case ' ', '\t':
+			l.col++
+		case '\n':
+			// check if we should add semicolon
+			if lastTokensLen < len(tokens) && shouldAddSemiColon {
+				tokens = append(tokens, Token{
+					Kind:  T_SEMICOLON,
+					Value: ";",
+					Line:  line,
+					Col:   col,
+				})
 			}
 
-			tokens = append(tokens, Token{
-				Kind:  kind,
-				Value: value,
-				Pos:   0,
-				Line:  line,
-				Col:   col,
-			})
-		} else if char == ' ' || char == '\t' {
-			l.col++
-		} else if char == '\n' {
+			shouldAddSemiColon = true
+			lastTokensLen = len(tokens)
+
 			l.line++
 			l.col = 1
-		} else {
-			return nil, fmt.Errorf(`unexpected char %s at col=%d line=%d`, string(char), l.col, l.line)
+		default:
+			if unicode.IsDigit(rune(char)) {
+				tokens = append(tokens, Token{
+					Kind:  T_NUMBER,
+					Value: l.parseNumber(),
+					Line:  line,
+					Col:   col,
+				})
+			} else if isOp, opValue := l.parseOp(char); isOp {
+				tokens = append(tokens, Token{
+					Kind:  opValue,
+					Value: string(char),
+					Line:  line,
+					Col:   col,
+				})
+			} else if isLiteral(string(char)) {
+				kind := T_FUNC_CALL
+				value := l.parseLiteral()
+
+				peekNonWSValue := l.peekNonWS()
+				peek := l.peek()
+
+				switch {
+				case value == "let" && isWS(peek):
+					kind = T_LET
+				case value == "for" && peekNonWSValue == '(':
+					kind = T_FOR
+				case value == "fn" && isWS(peek):
+					kind = T_FUNC_DEC
+				case value == "return" && isWS(peek):
+					kind = T_RETURN
+				case value == "if" && peekNonWSValue == '(':
+					kind = T_IF
+				case value == "else":
+					kind = T_ELSE
+
+				case peekNonWSValue != '(':
+					kind = T_VAR
+				}
+
+				tokens = append(tokens, Token{
+					Kind:  kind,
+					Value: value,
+					Line:  line,
+					Col:   col,
+				})
+			} else {
+				return nil, fmt.Errorf(`unexpected char %s at col=%d line=%d`, string(char), l.col, l.line)
+			}
+
 		}
 	}
 	return tokens, nil
@@ -302,7 +345,7 @@ func (l *Lexer) peekNonWS() byte {
 	pCursor := l.cursor + 1
 	for pCursor < len(l.source) {
 		char := l.source[pCursor]
-		if char == ' ' || char == '\t' || char == 'n' || char == '\r' {
+		if char == ' ' || char == '\t' || char == '\r' {
 			pCursor++
 			continue
 		}
@@ -345,6 +388,19 @@ func (l *Lexer) parseLiteral() string {
 	return result
 }
 
+func (l *Lexer) parseLineComment() string {
+	var comment string
+	l.readChar() // read /
+	for l.cursor < len(l.source)-1 {
+		char := l.getChar()
+		if char == '\n' {
+			break
+		}
+		comment += string(char)
+	}
+	return comment
+}
+
 func (l *Lexer) parseNumber() string {
 	commaFound := false
 	var result []byte
@@ -366,7 +422,7 @@ func (l *Lexer) parseNumber() string {
 	return string(result)
 }
 
-func parseOp(char byte) (bool, string) {
+func (l *Lexer) parseOp(char byte) (bool, string) {
 	switch char {
 	case '+':
 		return true, T_ADD

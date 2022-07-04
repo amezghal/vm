@@ -169,7 +169,7 @@ mainLoop:
 		case opARRAY:
 			arrayName := op1.(string)
 			vm.heap[arrayName] = make(map[int]any, 100)
-		case opADD, opSUB, opMUL, opQUO, opMOD, opLT, opLTE, opGT, opGTE, opEQ:
+		case opADD, opSUB, opMUL, opQUO, opMOD, opLT, opLTE, opGT, opGTE, opEQ, opOR, opAND:
 			operand2 := vm.stack.Pop()
 			operand1 := vm.stack.Pop()
 
@@ -254,6 +254,10 @@ mainLoop:
 		case opSUBUnary:
 			operand1 := vm.stack.Pop()
 			o1 := Arith(opMUL, VMValue{kind: T_NUMBER, value: -1}, operand1.(VMValue))
+			vm.stack.Push(o1)
+		case opNOT:
+			operand1 := vm.stack.Pop()
+			o1 := Arith(opNOT, operand1.(VMValue), VMValue{kind: T_NUMBER, value: -1})
 			vm.stack.Push(o1)
 		case opLEAVE:
 			if vm.callStack.Len() > 0 {

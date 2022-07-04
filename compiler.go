@@ -14,6 +14,7 @@ const (
 	opADD
 	opSUB
 	opSUBUnary
+	opNOT
 	opMUL
 	opQUO
 	opCALL
@@ -23,6 +24,8 @@ const (
 	opLTE
 	opGTE
 	opEQ
+	opOR
+	opAND
 	opJUMP
 	opRETURN
 	opLEAVE
@@ -39,6 +42,7 @@ var opNames = map[int]string{
 	opADD:      "ADD",
 	opSUB:      "SUB",
 	opSUBUnary: "SUBUnary",
+	opNOT:      "NOT",
 	opMUL:      "MUL",
 	opQUO:      "QUO",
 	opCALL:     "CALL",
@@ -48,6 +52,8 @@ var opNames = map[int]string{
 	opLTE:      "LTE",
 	opGTE:      "GTE",
 	opEQ:       "EQ",
+	opOR:       "OR",
+	opAND:      "AND",
 	opJUMP:     "JUMP",
 	opRETURN:   "RETURN",
 	opLEAVE:    "LEAVE",
@@ -137,7 +143,7 @@ func (c *Compiler) Push(cmd command) {
 		switch cmd.code {
 		case opPUSH:
 			*c.currRSP++
-		case opPOP, opCMP:
+		case opPOP, opCMP, opOR, opAND, opNOT:
 			*c.currRSP--
 
 		case opSUB, opADD, opMUL, opQUO, opLT, opLTE, opGT, opGTE:
@@ -340,10 +346,23 @@ func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 		node := postfix.atIndex(i)
 		switch node.(type) {
 		case astUnary, *astUnary:
+			var kind = opSUBUnary
+			switch node.(type) {
+			case astUnary:
+				k := string(node.(astUnary))
+				if k == T_NOT {
+					kind = opNOT
+				}
+			case *astUnary:
+				k := string(*node.(*astUnary))
+				if k == T_NOT {
+					kind = opNOT
+				}
+			}
 			op1 := ss.Pop()
 			ss.Push(op1)
 			c.Push(command{
-				code: opSUBUnary,
+				code: kind,
 				op1:  op1,
 			})
 		case astOp:
@@ -418,6 +437,20 @@ func (c *Compiler) genPostfix(frame *stackFrame, postfix astStack) {
 			case T_EQ:
 				c.Push(command{
 					code: opEQ,
+					op1:  op1,
+					op2:  op2,
+				})
+				ss.Push(op1)
+			case T_OR:
+				c.Push(command{
+					code: opOR,
+					op1:  op1,
+					op2:  op2,
+				})
+				ss.Push(op1)
+			case T_AND:
+				c.Push(command{
+					code: opAND,
 					op1:  op1,
 					op2:  op2,
 				})
@@ -622,16 +655,18 @@ func (c *Compiler) genAssign(frame *stackFrame, node astAssign) {
 }
 
 func (c *Compiler) genReturn(frame *stackFrame, node astReturn) {
-	doesReturn := false
 	if node.Stmt != nil {
 		c.genExpression(frame, *node.Stmt) // result will be on top of store
-		doesReturn = true                  // so tell the vm to use it a return value
+	} else {
+		c.Push(command{
+			code: opPUSH,
+			op1:  VMValue{value: nil, kind: T_UNDEFINED},
+		})
 	}
 
 	c.Push(command{
 		code: opRETURN,
 		op1:  frame.funcReturnPC,
-		op2:  doesReturn, // tell the VM it's plain return, so we need to push UNDEFINED as a return value
 	})
 }
 
@@ -654,7 +689,7 @@ func (c *Compiler) genBody(frame *stackFrame, body astBody) {
 }
 
 func (c *Compiler) genFor(frame *stackFrame, body astFor) {
-	c.startCxt(frame)
+	c.openScope(frame)
 	switch body.Pre.(type) {
 	case astAssign:
 		c.genAssign(frame, body.Pre.(astAssign))
@@ -676,9 +711,9 @@ func (c *Compiler) genFor(frame *stackFrame, body astFor) {
 		op1:  endOfFor,
 	})
 
-	c.startCxt(frame)
+	c.openScope(frame)
 	c.genBody(frame, body.Body)
-	c.endCtx(frame)
+	c.closeScope(frame)
 
 	switch body.Post.(type) {
 	case astAssign:
@@ -692,7 +727,7 @@ func (c *Compiler) genFor(frame *stackFrame, body astFor) {
 	})
 
 	*endOfFor = c.pc
-	c.endCtx(frame) // `for` block will create local variables on the stack, so make sure to always cleanup
+	c.closeScope(frame) // `for` block will create local variables on the stack, so make sure to always cleanup
 }
 
 func intP() *int {
@@ -713,9 +748,9 @@ func (c *Compiler) genIf(frame *stackFrame, node astIf) {
 		op1:  next,
 	})
 
-	c.startCxt(frame)
+	c.openScope(frame)
 	c.genBody(frame, node.Body)
-	c.endCtx(frame)
+	c.closeScope(frame)
 
 	c.Push(command{
 		code: opJUMP,
@@ -733,9 +768,9 @@ func (c *Compiler) genIf(frame *stackFrame, node astIf) {
 				op1:  endOfElseIf,
 			})
 
-			c.startCxt(frame)
+			c.openScope(frame)
 			c.genBody(frame, n.Body)
-			c.endCtx(frame)
+			c.closeScope(frame)
 
 			c.Push(command{
 				code: opJUMP,
@@ -751,9 +786,9 @@ func (c *Compiler) genIf(frame *stackFrame, node astIf) {
 			*next = c.pc
 		}
 
-		c.startCxt(frame)
+		c.openScope(frame)
 		c.genBody(frame, node.Else.Body)
-		c.endCtx(frame)
+		c.closeScope(frame)
 	}
 	*endOfIf = c.pc
 
@@ -763,11 +798,12 @@ func (c *Compiler) genIf(frame *stackFrame, node astIf) {
 	}
 }
 
-func (c *Compiler) startCxt(frame *stackFrame) {
+// local variables scope
+func (c *Compiler) openScope(frame *stackFrame) {
 	frame.locals.store.Push(vmLocals{})
 }
 
-func (c *Compiler) endCtx(frame *stackFrame) {
+func (c *Compiler) closeScope(frame *stackFrame) {
 	dd := frame.locals.pop()
 	// clean context local vars
 	for i := 0; i < len(dd); i++ {

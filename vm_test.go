@@ -5,17 +5,40 @@ import (
 	"testing"
 )
 
+var scriptAndOr = `
+// test || and &&
+
+fn main(){
+	cond1 = 33
+	cond2 = -1
+	if (cond2 == -2){
+		_=printf("true-> cond1 || cond2")
+	}else{
+		_=printf("false-> cond1 || cond2")
+	}
+
+	if (cond1 && !cond2){
+		_=printf("true-> cond1 && cond2")
+	}else{
+		_=printf("false-> cond1 && cond2")
+	}
+}
+`
 var scriptNestedLoops = `
+
 fn main() {
+	// this is a test
 	let s = 12;
+	f = test(1, 2, 4);
+	_ = printf(f);
 	for (j=2; j<=120; j = j + 1){
 		for (kk=3; kk<5; kk = kk + 1){
-			let xxx = 10;
+			let xxx = 10
 			if (xxx<5){
-				_ = printf("case 1");
+				_ = printf("case 1")
 				for (kkk=0; kkk<2; kkk = kkk + 1){
 					let g = 3 + -2;
-					let koko = 3 + 2;
+					let koko = 3 + 2
 					let hello = 12;
 					
 					s = s + 1+kkk+kk+j+add(g, koko, hello);
@@ -53,24 +76,13 @@ fn main() {
 	_=printf(s);
 }
 
+fn test(a, b, c){
+	return ;
+	_ = printf("unreachable") ;
+}
+
 fn add(a, b, c){
 	return a + b * c;
-}
-`
-
-var scriptArray = `
-fn main(){
-	let store = [];
-	for (let i=0; i<10; i = i+1){
-		store[i] = i*-i;
-	}
-	
-	let total = 0;
-	for (let j=0; j<10; j = j+1){
-		total = total + store[j] * 3;
-		_=printf(total);
-	}
- 	return 0;
 }
 `
 

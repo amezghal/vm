@@ -322,6 +322,10 @@ func parseReturnStmt() astNode {
 	node := astReturn{}
 
 	if ntk() == T_RETURN {
+		if peek() == T_SEMICOLON {
+			_ = ntk()
+			return node
+		}
 		if stmt := parseExpression(); stmt != nil {
 			s := stmt.(astExpression)
 			node.Stmt = &s
@@ -431,19 +435,12 @@ func parseBody() astNode {
 func parseExpression() astNode {
 	c := mainCursor
 	node := astExpression{}
-	_ = `
-5 + 4 * 3 => 4 3 * 5 +
-// mine
-5 + 4 * 3 * (5 + 4 * 3) => 4 3 4 3 * 5 + * 5 +
-// actually
-5 + 4 * 3 * (5 + 4 * 3) => 4 3 4 3 * 5 + * 5 +
-// it's associative :)
-`
+
 	for mainCursor < maxCursor {
 		cc := mainCursor
 		nLitNode := parseLit()
 		if (nLitNode != nil && peek() == T_SEMICOLON) || nLitNode != nil {
-			if nOpNode := parseIsOp(); nOpNode != nil {
+			if nOpNode := parseOp(); nOpNode != nil {
 				node = append(node, nLitNode)
 				node = append(node, nOpNode)
 				continue //
@@ -472,11 +469,10 @@ func isUnary(tokenType string) bool {
 
 // cleanup this, not very clean
 // this should be supported in the lexer
-func parseIsOp() astNode {
-	t := peek()
-	node := astOp{}
-	switch t {
-	case T_SUB, T_ADD, T_MUL, T_QUO, T_EQ, T_GT, T_GTE, T_LTE, T_LT, T_MOD:
+func parseOp() astNode {
+	t := tokens[mainCursor]
+	if t.IsOp() {
+		node := astOp{}
 		node.Token = tokens[mainCursor]
 		_ = ntk()
 		return node

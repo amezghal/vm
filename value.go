@@ -272,6 +272,21 @@ func doArith(op int, operand1, operand2 any) any {
 				return 1
 			}
 			return 0
+		case opOR:
+			if op1 != 0 || op2 != 0 {
+				return 1
+			}
+			return 0
+		case opAND:
+			if op1 != 0 && op2 != 0 {
+				return 1
+			}
+			return 0
+		case opNOT:
+			if op1 != 0 {
+				return 0
+			}
+			return 1
 		default:
 			return 0
 		}
@@ -314,6 +329,21 @@ func doArith(op int, operand1, operand2 any) any {
 				return 1
 			}
 			return 0
+		case opOR:
+			if op1 != 0 || op2 != 0 {
+				return 1
+			}
+			return 0
+		case opAND:
+			if op1 != 0 && op2 != 0 {
+				return 1
+			}
+			return 0
+		case opNOT:
+			if op1 != 0 {
+				return 0
+			}
+			return 1
 		default:
 			return .0
 		}
