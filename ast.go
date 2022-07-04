@@ -1,4 +1,4 @@
-package main
+package vm
 
 import (
 	"fmt"
@@ -8,6 +8,31 @@ import (
 var mainCursor = 0
 var maxCursor = math.MaxInt - 1
 var tokens []Token
+
+// @todo need to move this to the Stack generic
+type astStack []astNode
+
+func (a *astStack) push(value astNode) {
+	*a = append(*a, value)
+}
+
+func (a *astStack) pop() astNode {
+	ret := (*a)[len(*a)-1]
+	*a = (*a)[:len(*a)-1]
+	return ret
+}
+
+func (a *astStack) tail() astNode {
+	return (*a)[len(*a)-1]
+}
+
+func (a *astStack) atIndex(index int) astNode {
+	return (*a)[index]
+}
+
+func (a *astStack) len() int {
+	return len(*a)
+}
 
 // all astNodes must be of type astNode
 type astNode interface {

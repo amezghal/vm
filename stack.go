@@ -1,4 +1,4 @@
-package main
+package vm
 
 type Value interface {
 	int | float64 | string | VMValue | any | vmLocals

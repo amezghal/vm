@@ -1,6 +1,5 @@
-package main
+package vm
 
-import "C"
 import (
 	"fmt"
 	"strconv"
